@@ -4,6 +4,7 @@ Enhanced version: Find businesses without websites with expanded data collection
 """
 
 import os
+import sys
 import time
 import csv
 from datetime import datetime
@@ -28,7 +29,7 @@ try:
 except Exception as e:
     print(f"❌ Configuration Error: {e}")
     print("Please check your .env file and ensure all required settings are present.")
-    exit(1)
+    sys.exit(1)
 
 # Comprehensive Business Categories - Cast a wide net!
 BUSINESS_CATEGORIES = {
@@ -348,7 +349,31 @@ def save_leads_to_csv(leads: List[OrderedDict], filename: str) -> int:
     logger.info(f"Saved {len(unique_leads)} unique leads to {filename} (removed {len(leads) - len(unique_leads)} duplicates)")
     return len(unique_leads)
 
-# ───── 4. MAIN FUNCTION ─────
+# ───── 4. HELPER FUNCTIONS ─────
+def generate_config_id(cities: List[str], search_keywords: List[str]) -> str:
+    """
+    Generate a stable config ID based on cities and search keywords.
+    
+    Args:
+        cities: List of cities to search
+        search_keywords: List of search keywords
+        
+    Returns:
+        Stable config ID string
+    """
+    import hashlib
+    
+    # Create a stable string from config parameters
+    cities_str = "|".join(sorted(cities))
+    keywords_str = "|".join(sorted(search_keywords))
+    config_str = f"{cities_str}||{keywords_str}"
+    
+    # Generate a short hash for the config
+    config_hash = hashlib.md5(config_str.encode()).hexdigest()[:8]
+    return f"checkpoint_{config_hash}.json"
+
+
+# ───── 5. MAIN FUNCTION ─────
 def main():
     logger.info("=" * 60)
     logger.info("🚀 ENHANCED BUSINESS LEAD SCRAPER")
@@ -359,8 +384,9 @@ def main():
     logger.info(f"🔢 API Quota: {quota_tracker.get_usage_stats()}")
     logger.info("=" * 60)
     
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    checkpoint_file = f"checkpoint_{timestamp}.json"
+    # Generate stable checkpoint filename based on config
+    checkpoint_file = generate_config_id(config.cities, SEARCH_KEYWORDS)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # Keep for output files
     
     # Try to load existing checkpoint
     checkpoint_data = load_checkpoint(checkpoint_file)

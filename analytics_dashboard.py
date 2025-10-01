@@ -270,17 +270,17 @@ def create_html_dashboard(stats: Dict[str, Any], output_file: str = "dashboard.h
                     <tr>
                         <td>With Phone Numbers</td>
                         <td>{stats['with_phone']:,}</td>
-                        <td>{(stats['with_phone'] / stats['total_businesses'] * 100):.1f}%</td>
+                        <td>{(stats['with_phone'] / stats['total_businesses'] * 100):.1f}% if stats['total_businesses'] else "0.0%"</td>
                     </tr>
                     <tr>
                         <td>With Ratings</td>
                         <td>{stats['with_rating']:,}</td>
-                        <td>{(stats['with_rating'] / stats['total_businesses'] * 100):.1f}%</td>
+                        <td>{(stats['with_rating'] / stats['total_businesses'] * 100):.1f}% if stats['total_businesses'] else "0.0%"</td>
                     </tr>
                     <tr>
                         <td>With Hours</td>
                         <td>{stats['with_hours']:,}</td>
-                        <td>{(stats['with_hours'] / stats['total_businesses'] * 100):.1f}%</td>
+                        <td>{(stats['with_hours'] / stats['total_businesses'] * 100):.1f}% if stats['total_businesses'] else "0.0%"</td>
                     </tr>
                 </table>
             </div>

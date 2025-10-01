@@ -22,6 +22,7 @@ from utils import ScraperConfig, setup_logging, ScraperConstants
 
 # Load environment and setup
 try:
+    load_dotenv()  # Load .env file before creating config
     config = ScraperConfig.from_env()
     logger = setup_logging(config.log_level)
     VERIFIED_DIR = os.path.join(config.output_dir, "verified")

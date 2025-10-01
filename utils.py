@@ -5,6 +5,8 @@ Utility functions and logging configuration for the Local Business Lead Generato
 import os
 import logging
 import json
+import re
+import time
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
@@ -88,6 +90,10 @@ class APIQuotaTracker:
     """Track Google API usage to prevent quota exceeded errors."""
     
     def __init__(self, max_requests_per_day: int = 25000, checkpoint_file: str = "api_quota.json"):
+        # Validate max_requests_per_day is positive
+        if max_requests_per_day <= 0:
+            raise ValueError(f"max_requests_per_day must be a positive integer, got {max_requests_per_day}")
+        
         self.max_requests = max_requests_per_day
         self.requests_made = 0
         self.checkpoint_file = checkpoint_file
@@ -108,14 +114,55 @@ class APIQuotaTracker:
                 self.requests_made = 0
     
     def save_checkpoint(self) -> None:
-        """Save current quota usage to checkpoint file."""
+        """Save current quota usage to checkpoint file with atomic write and error handling."""
         data = {
             'date': datetime.now().strftime('%Y-%m-%d'),
             'requests_made': self.requests_made,
             'max_requests': self.max_requests
         }
-        with open(self.checkpoint_file, 'w') as f:
-            json.dump(data, f)
+        
+        # Get logger for error reporting
+        logger = logging.getLogger('lead_scraper')
+        
+        # Ensure directory exists
+        checkpoint_dir = os.path.dirname(self.checkpoint_file)
+        if checkpoint_dir:
+            os.makedirs(checkpoint_dir, exist_ok=True)
+        
+        # Atomic write with retry logic
+        max_retries = 1
+        for attempt in range(max_retries + 1):
+            try:
+                # Create temporary file in same directory
+                temp_file = f"{self.checkpoint_file}.tmp"
+                
+                with open(temp_file, 'w') as f:
+                    json.dump(data, f)
+                    f.flush()  # Ensure data is written to disk
+                    os.fsync(f.fileno())  # Force OS to flush buffers
+                
+                # Atomic move
+                os.replace(temp_file, self.checkpoint_file)
+                return  # Success, exit function
+                
+            except (OSError, IOError, json.JSONEncodeError) as e:
+                error_msg = f"Failed to save checkpoint (attempt {attempt + 1}/{max_retries + 1}): {type(e).__name__}: {e}"
+                logger.error(error_msg)
+                
+                # Clean up temp file if it exists
+                try:
+                    if os.path.exists(temp_file):
+                        os.remove(temp_file)
+                except OSError:
+                    pass  # Ignore cleanup errors
+                
+                # If this was the last attempt, fail gracefully
+                if attempt == max_retries:
+                    logger.error("Checkpoint save failed after all retries. Continuing without saving checkpoint.")
+                    return  # Fail gracefully instead of raising
+                
+                # Brief delay before retry
+                time.sleep(0.1)
     
     def can_make_request(self) -> bool:
         """Check if we can make another API request."""
@@ -128,11 +175,16 @@ class APIQuotaTracker:
     
     def get_usage_stats(self) -> Dict[str, Any]:
         """Get current usage statistics."""
+        # Guard against division by zero
+        usage_percentage = 0.0
+        if self.max_requests > 0:
+            usage_percentage = (self.requests_made / self.max_requests) * 100
+        
         return {
             'requests_made': self.requests_made,
             'max_requests': self.max_requests,
             'remaining': self.max_requests - self.requests_made,
-            'usage_percentage': (self.requests_made / self.max_requests) * 100
+            'usage_percentage': usage_percentage
         }
 
 
@@ -146,7 +198,26 @@ def setup_logging(log_level: str = "INFO", log_dir: str = "logs") -> logging.Log
         
     Returns:
         Configured logger instance
+        
+    Raises:
+        ValueError: If log_level is not a valid logging level
     """
+    # Validate log_level against known logging levels
+    valid_levels = {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"}
+    log_level_upper = log_level.upper()
+    
+    if log_level_upper not in valid_levels:
+        raise ValueError(f"Invalid log_level '{log_level}'. Must be one of: {', '.join(valid_levels)}")
+    
+    # Get the named logger first
+    logger = logging.getLogger('lead_scraper')
+    
+    # Clear existing handlers to prevent duplicates
+    logger.handlers.clear()
+    
+    # Prevent propagation to root logger to avoid duplicate messages
+    logger.propagate = False
+    
     # Create logs directory
     os.makedirs(log_dir, exist_ok=True)
     
@@ -154,17 +225,22 @@ def setup_logging(log_level: str = "INFO", log_dir: str = "logs") -> logging.Log
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file = os.path.join(log_dir, f"scraper_{timestamp}.log")
     
-    # Configure logging
-    logging.basicConfig(
-        level=getattr(logging, log_level.upper()),
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_file, encoding='utf-8'),
-            logging.StreamHandler()
-        ]
-    )
+    # Create formatter
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     
-    logger = logging.getLogger('lead_scraper')
+    # Create and add file handler
+    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    
+    # Create and add console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+    
+    # Set logger level using the validated level
+    logger.setLevel(getattr(logging, log_level_upper))
+    
     logger.info(f"Logging initialized. Log file: {log_file}")
     
     return logger
@@ -172,7 +248,12 @@ def setup_logging(log_level: str = "INFO", log_dir: str = "logs") -> logging.Log
 
 def validate_city_format(city: str) -> bool:
     """
-    Validate city name format.
+    Validate city name format using regex-based validation.
+    
+    Validates that the city string:
+    - Contains at least two space-separated parts
+    - Allows letters, digits, spaces, hyphens, apostrophes, and periods
+    - Has a final token that is either a valid state code or alphabetic
     
     Args:
         city: City name to validate
@@ -180,9 +261,40 @@ def validate_city_format(city: str) -> bool:
     Returns:
         True if valid format, False otherwise
     """
-    # Basic validation: should contain at least city and state
-    parts = city.strip().split()
-    return len(parts) >= 2 and all(part.isalpha() for part in parts)
+    if not city or not isinstance(city, str):
+        return False
+    
+    # Trim and collapse whitespace
+    city = re.sub(r'\s+', ' ', city.strip())
+    
+    # Split into parts
+    parts = city.split()
+    
+    # Must have at least two parts
+    if len(parts) < 2:
+        return False
+    
+    # Compiled regex for valid characters in city tokens
+    # Allows letters, digits, spaces, hyphens, apostrophes, and periods
+    city_pattern = re.compile(r'^[A-Za-z0-9 .\'-]+$')
+    
+    # Check if the full city string matches the allowed character pattern
+    if not city_pattern.match(city):
+        return False
+    
+    # Validate the last token (state code or alphabetic token)
+    last_token = parts[-1]
+    
+    # Check if it's a valid state code (2 letters, optionally with periods)
+    state_code_pattern = re.compile(r'^[A-Za-z]{2}\.?$')
+    if state_code_pattern.match(last_token):
+        return True
+    
+    # If not a state code, check if it's at least alphabetic
+    if last_token.isalpha():
+        return True
+    
+    return False
 
 
 def validate_api_key(api_key: str) -> bool:
@@ -199,13 +311,16 @@ def validate_api_key(api_key: str) -> bool:
     return len(api_key) >= 30 and api_key.startswith('AIza')
 
 
-def save_checkpoint(processed_items: List[Dict], checkpoint_file: str) -> None:
+def save_checkpoint(processed_items: List[Dict], checkpoint_file: str) -> bool:
     """
-    Save progress checkpoint to resume later.
+    Save progress checkpoint to resume later with atomic write and error handling.
     
     Args:
         processed_items: List of processed business items
         checkpoint_file: Path to checkpoint file
+        
+    Returns:
+        True if checkpoint saved successfully, False otherwise
     """
     checkpoint_data = {
         'timestamp': datetime.now().isoformat(),
@@ -213,8 +328,51 @@ def save_checkpoint(processed_items: List[Dict], checkpoint_file: str) -> None:
         'processed_items': processed_items
     }
     
-    with open(checkpoint_file, 'w') as f:
-        json.dump(checkpoint_data, f, indent=2)
+    # Get logger for error reporting
+    logger = logging.getLogger('lead_scraper')
+    
+    # Ensure directory exists
+    checkpoint_dir = os.path.dirname(checkpoint_file)
+    if checkpoint_dir:
+        try:
+            os.makedirs(checkpoint_dir, exist_ok=True)
+        except OSError as e:
+            logger.error(f"Failed to create checkpoint directory '{checkpoint_dir}': {e}")
+            return False
+    
+    # Atomic write using temporary file
+    temp_file = f"{checkpoint_file}.tmp"
+    
+    try:
+        with open(temp_file, 'w') as f:
+            json.dump(checkpoint_data, f, indent=2)
+            f.flush()  # Ensure data is written to disk
+            os.fsync(f.fileno())  # Force OS to write to disk
+        
+        # Atomic move - this is atomic on most filesystems
+        os.replace(temp_file, checkpoint_file)
+        logger.debug(f"Checkpoint saved successfully to '{checkpoint_file}'")
+        return True
+        
+    except (OSError, IOError) as e:
+        logger.error(f"Failed to save checkpoint to '{checkpoint_file}': {e}")
+        # Clean up temporary file if it exists
+        try:
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+        except OSError:
+            pass  # Ignore cleanup errors
+        return False
+        
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.error(f"Failed to serialize checkpoint data for '{checkpoint_file}': {e}")
+        # Clean up temporary file if it exists
+        try:
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+        except OSError:
+            pass  # Ignore cleanup errors
+        return False
 
 
 def load_checkpoint(checkpoint_file: str) -> Dict[str, Any]:
@@ -256,7 +414,9 @@ def extract_domain(url: str) -> str:
         # Clean up
         domain = domain.split('/')[0]
         return domain
-    except:
+    except Exception as e:
+        logger = logging.getLogger('lead_scraper')
+        logger.error(f"Error extracting domain from URL '{url}': {e}")
         return ""
 
 

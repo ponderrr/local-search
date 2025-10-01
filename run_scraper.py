@@ -93,12 +93,6 @@ Examples:
         help='Number of concurrent browsers for verification (default: 3)'
     )
     verification_group.add_argument(
-        '--headless', 
-        action='store_true', 
-        default=True, 
-        help='Run browsers in headless mode (default: True)'
-    )
-    verification_group.add_argument(
         '--no-headless', 
         action='store_true', 
         help='Show browser windows during verification'
@@ -144,21 +138,22 @@ def update_env_file(args):
         env_content['SEARCH_CITIES'] = ', '.join(args.cities)
     if args.api_key:
         env_content['GOOGLE_API_KEY'] = args.api_key
-    if args.delay:
+    if args.delay is not None:
         env_content['API_DELAY'] = str(args.delay)
-    if args.max_pages:
+    if args.max_pages is not None:
         env_content['MAX_PAGES'] = str(args.max_pages)
     if args.output_dir:
         env_content['OUTPUT_DIR'] = args.output_dir
-    if args.browsers:
+    if args.browsers is not None:
         env_content['CONCURRENT_BROWSERS'] = str(args.browsers)
-    if args.headless and not args.no_headless:
-        env_content['HEADLESS'] = 'true'
-    elif args.no_headless:
+    # Headless mode is enabled by default, disabled only when --no-headless is specified
+    if args.no_headless:
         env_content['HEADLESS'] = 'false'
+    else:
+        env_content['HEADLESS'] = 'true'
     if args.log_level:
         env_content['LOG_LEVEL'] = args.log_level
-    if args.quota_limit:
+    if args.quota_limit is not None:
         env_content['MAX_REQUESTS_PER_DAY'] = str(args.quota_limit)
     
     # Write updated .env file

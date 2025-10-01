@@ -24,7 +24,7 @@ A powerful Python tool that finds local businesses without websites for web deve
 
 ```bash
 # Clone the repository
-git clone <your-repo-url>
+git clone https://github.com/ponderrr/local-search.git
 cd local-search
 
 # Create virtual environment
