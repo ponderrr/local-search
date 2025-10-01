@@ -17,17 +17,19 @@ from urllib.parse import urlparse
 from playwright.async_api import async_playwright, Browser, Page
 from dotenv import load_dotenv
 
-# Load environment
-load_dotenv()
-OUTPUT_DIR = os.getenv("OUTPUT_DIR", "leads_output")
-VERIFIED_DIR = os.path.join(OUTPUT_DIR, "verified")
-os.makedirs(VERIFIED_DIR, exist_ok=True)
+# Import our utility modules
+from utils import ScraperConfig, setup_logging, ScraperConstants
 
-# Configuration
-CONCURRENT_BROWSERS = 3  # Number of parallel browser instances
-SEARCH_DELAY_MIN = 1.0  # Minimum delay between searches (seconds)
-SEARCH_DELAY_MAX = 3.0  # Maximum delay between searches
-HEADLESS = True  # Run browsers in headless mode (set False for debugging)
+# Load environment and setup
+try:
+    config = ScraperConfig.from_env()
+    logger = setup_logging(config.log_level)
+    VERIFIED_DIR = os.path.join(config.output_dir, "verified")
+    os.makedirs(VERIFIED_DIR, exist_ok=True)
+    logger.info("Verification script initialized successfully")
+except Exception as e:
+    print(f"❌ Configuration Error: {e}")
+    exit(1)
 
 # Known chain/franchise domains to filter out
 CHAIN_DOMAINS = {
@@ -107,13 +109,13 @@ class WebsiteVerifier:
         domain_clean = re.sub(r'[^a-z0-9]', '', domain)
         
         # If business name appears in domain, likely their website
-        if len(business_name_clean) > 4 and business_name_clean in domain_clean:
+        if len(business_name_clean) > ScraperConstants.MIN_BUSINESS_NAME_LENGTH and business_name_clean in domain_clean:
             return (True, "business_website")
         
         # Check for .com/.net/.org/.biz etc with potential business domain
         business_words = business_name_clean.split()
         for word in business_words:
-            if len(word) > 4 and word in domain_clean:
+            if len(word) > ScraperConstants.MIN_BUSINESS_NAME_LENGTH and word in domain_clean:
                 return (True, "likely_business_website")
         
         # If none of the above, it's probably not their website
@@ -136,7 +138,7 @@ class WebsiteVerifier:
         
         try:
             # Random delay to appear human-like
-            await asyncio.sleep(random.uniform(SEARCH_DELAY_MIN, SEARCH_DELAY_MAX))
+            await asyncio.sleep(random.uniform(config.search_delay_min, config.search_delay_max))
             
             # Navigate to Google
             await page.goto('https://www.google.com/search?q=' + search_query.replace(' ', '+'))
@@ -190,7 +192,7 @@ class WebsiteVerifier:
             business['verified_date'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
         except Exception as e:
-            print(f"    ⚠️ Error searching for {business_name}: {str(e)}")
+            logger.error(f"Error searching for {business_name}: {str(e)}")
             business['verification_status'] = 'ERROR'
             business['website_found'] = ''
             business['verified_date'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -208,44 +210,44 @@ class WebsiteVerifier:
         
         for business in businesses:
             self.processed += 1
-            print(f"  [{self.processed}/{self.total_businesses}] Verifying: {business['name']} - {business['city']}")
+            logger.info(f"[{self.processed}/{self.total_businesses}] Verifying: {business['name']} - {business['city']}")
             
             verified_business = await self.search_business(page, business)
             self.results.append(verified_business)
             
-            # Print status
+            # Log status
             status = verified_business['verification_status']
             if status == 'VERIFIED_NO_WEBSITE':
-                print(f"    ✅ Verified - No website found")
+                logger.info(f"✅ Verified - No website found")
             elif status == 'REMOVED_CHAIN':
-                print(f"    ❌ Removed - Chain business")
+                logger.info(f"❌ Removed - Chain business")
             elif status == 'REMOVED_HAS_WEBSITE':
-                print(f"    ❌ Removed - Has website: {verified_business.get('website_found', '')[:50]}...")
+                logger.info(f"❌ Removed - Has website: {verified_business.get('website_found', '')[:50]}...")
             else:
-                print(f"    ⚠️ Error during verification")
+                logger.warning(f"⚠️ Error during verification")
         
         await context.close()
     
     async def verify_all(self):
         """Main verification process using multiple browser instances."""
-        print(f"\n🔍 Starting verification of {self.total_businesses} businesses...")
-        print(f"   Using {CONCURRENT_BROWSERS} concurrent browsers\n")
+        logger.info(f"🔍 Starting verification of {self.total_businesses} businesses...")
+        logger.info(f"   Using {config.concurrent_browsers} concurrent browsers")
         
         async with async_playwright() as p:
             # Launch browser
             browser = await p.chromium.launch(
-                headless=HEADLESS,
+                headless=config.headless,
                 args=['--disable-blink-features=AutomationControlled']
             )
             
             # Split businesses into batches for each worker
             businesses_list = self.df.to_dict('records')
-            batch_size = len(businesses_list) // CONCURRENT_BROWSERS
+            batch_size = len(businesses_list) // config.concurrent_browsers
             batches = []
             
-            for i in range(CONCURRENT_BROWSERS):
+            for i in range(config.concurrent_browsers):
                 start_idx = i * batch_size
-                if i == CONCURRENT_BROWSERS - 1:
+                if i == config.concurrent_browsers - 1:
                     # Last batch gets remaining businesses
                     batch = businesses_list[start_idx:]
                 else:
@@ -265,7 +267,7 @@ class WebsiteVerifier:
     def save_results(self):
         """Save verified results to new CSV files."""
         if not self.results:
-            print("❌ No results to save")
+            logger.error("No results to save")
             return
         
         # Create DataFrame from results
@@ -286,39 +288,39 @@ class WebsiteVerifier:
         if not verified_df.empty:
             verified_file = os.path.join(VERIFIED_DIR, f"verified_no_website_{timestamp}.csv")
             verified_df.to_csv(verified_file, index=False)
-            print(f"\n✅ Saved {len(verified_df)} verified leads to: {verified_file}")
+            logger.info(f"✅ Saved {len(verified_df)} verified leads to: {verified_file}")
         
         # Save removed businesses (for reference)
         if not removed_df.empty:
             removed_file = os.path.join(VERIFIED_DIR, f"removed_businesses_{timestamp}.csv")
             removed_df.to_csv(removed_file, index=False)
-            print(f"📋 Saved {len(removed_df)} removed businesses to: {removed_file}")
+            logger.info(f"📋 Saved {len(removed_df)} removed businesses to: {removed_file}")
         
         # Save full results with all verification details
         full_results_file = os.path.join(VERIFIED_DIR, f"full_verification_results_{timestamp}.csv")
         results_df.to_csv(full_results_file, index=False)
-        print(f"📊 Saved complete results to: {full_results_file}")
+        logger.info(f"📊 Saved complete results to: {full_results_file}")
         
         return verified_file if not verified_df.empty else None
 
 def main():
     """Main function to run the verification process."""
-    print("=" * 60)
-    print("🌐 WEBSITE VERIFICATION SCRIPT")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("🌐 WEBSITE VERIFICATION SCRIPT")
+    logger.info("=" * 60)
     
     # Find the most recent leads file
     import glob
-    lead_files = glob.glob(os.path.join(OUTPUT_DIR, "all_leads_no_website_*.csv"))
+    lead_files = glob.glob(os.path.join(config.output_dir, "all_leads_no_website_*.csv"))
     
     if not lead_files:
-        print("❌ No leads file found. Please run the scraping script first.")
+        logger.error("No leads file found. Please run the scraping script first.")
         return
     
     # Use the most recent file
     lead_files.sort()
     latest_file = lead_files[-1]
-    print(f"📂 Using leads file: {latest_file}")
+    logger.info(f"📂 Using leads file: {latest_file}")
     
     # Create verifier instance
     verifier = WebsiteVerifier(latest_file)
@@ -332,21 +334,21 @@ def main():
     verified_file = verifier.save_results()
     
     # Print statistics
-    print("\n" + "=" * 60)
-    print("📈 VERIFICATION STATISTICS")
-    print("=" * 60)
-    print(f"Total businesses processed: {verifier.stats['total']}")
-    print(f"✅ Verified (no website): {verifier.stats['verified_no_website']} ({verifier.stats['verified_no_website']/verifier.stats['total']*100:.1f}%)")
-    print(f"❌ Has website: {verifier.stats['has_website']}")
-    print(f"❌ Chain/Franchise: {verifier.stats['is_chain']}")
-    print(f"⚠️ Processing errors: {verifier.stats['processing_errors']}")
-    print(f"\n⏱️ Time elapsed: {elapsed_time:.1f} seconds")
-    print(f"⚡ Average per business: {elapsed_time/verifier.stats['total']:.2f} seconds")
+    logger.info("=" * 60)
+    logger.info("📈 VERIFICATION STATISTICS")
+    logger.info("=" * 60)
+    logger.info(f"Total businesses processed: {verifier.stats['total']}")
+    logger.info(f"✅ Verified (no website): {verifier.stats['verified_no_website']} ({verifier.stats['verified_no_website']/verifier.stats['total']*100:.1f}%)")
+    logger.info(f"❌ Has website: {verifier.stats['has_website']}")
+    logger.info(f"❌ Chain/Franchise: {verifier.stats['is_chain']}")
+    logger.info(f"⚠️ Processing errors: {verifier.stats['processing_errors']}")
+    logger.info(f"⏱️ Time elapsed: {elapsed_time:.1f} seconds")
+    logger.info(f"⚡ Average per business: {elapsed_time/verifier.stats['total']:.2f} seconds")
     
     if verified_file:
-        print(f"\n🎯 YOUR CLEAN LEADS ARE READY!")
-        print(f"📍 Location: {verified_file}")
-        print(f"💼 You have {verifier.stats['verified_no_website']} qualified prospects to contact!")
+        logger.info("🎯 YOUR CLEAN LEADS ARE READY!")
+        logger.info(f"📍 Location: {verified_file}")
+        logger.info(f"💼 You have {verifier.stats['verified_no_website']} qualified prospects to contact!")
 
 if __name__ == "__main__":
     # Install required packages:

@@ -15,22 +15,20 @@ from dotenv import load_dotenv
 import googlemaps
 from googlemaps.exceptions import ApiError, TransportError
 
+# Import our utility modules
+from utils import ScraperConfig, APIQuotaTracker, setup_logging, ScraperConstants, save_checkpoint, load_checkpoint, fuzzy_match
+
 # ───── 1. LOAD CONFIGURATION ─────
-load_dotenv()
-
-# API Configuration
-API_KEY = os.getenv("GOOGLE_API_KEY")
-if not API_KEY:
-    raise RuntimeError("GOOGLE_API_KEY not found in environment or .env file")
-
-# Cities Configuration (REQUIRED in env)
-CITIES_ENV = os.getenv("SEARCH_CITIES")
-if not CITIES_ENV:
-    raise RuntimeError(
-        "SEARCH_CITIES not found in .env file. "
-        "Please add: SEARCH_CITIES=City1 State, City2 State, City3 State"
-    )
-CITIES = [city.strip() for city in CITIES_ENV.split(",")]
+try:
+    config = ScraperConfig.from_env()
+    config.validate()
+    logger = setup_logging(config.log_level)
+    quota_tracker = APIQuotaTracker(config.max_requests_per_day)
+    logger.info("Configuration loaded and validated successfully")
+except Exception as e:
+    print(f"❌ Configuration Error: {e}")
+    print("Please check your .env file and ensure all required settings are present.")
+    exit(1)
 
 # Comprehensive Business Categories - Cast a wide net!
 BUSINESS_CATEGORIES = {
@@ -130,15 +128,11 @@ SEARCH_KEYWORDS = []
 for category, keywords in BUSINESS_CATEGORIES.items():
     SEARCH_KEYWORDS.extend(keywords)
 
-# Search settings
-DELAY_BETWEEN_REQUESTS = float(os.getenv("API_DELAY", "0.2"))
-OUTPUT_DIR = os.getenv("OUTPUT_DIR", "leads_output")
-
 # ───── 2. INIT GOOGLE CLIENT ─────
-gmaps = googlemaps.Client(key=API_KEY)
+gmaps = googlemaps.Client(key=config.api_key)
 
 # Create output directory if it doesn't exist
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(config.output_dir, exist_ok=True)
 
 # ───── 3. HELPER FUNCTIONS ─────
 def get_business_category(types_list: List[str]) -> str:
@@ -173,17 +167,26 @@ def safe_place_details(pid: str, fields: List[str], max_retry: int = 3) -> Dict:
             delay *= 2
     return {}
 
-def text_search_all_pages(query: str, max_pages: int = 3) -> List[str]:
+def text_search_all_pages(query: str, max_pages: int = None) -> List[str]:
     """Get all place IDs from text search (up to 60 results)."""
+    if max_pages is None:
+        max_pages = config.max_pages
+        
     place_ids = []
     page_token = None
     
     for page_num in range(max_pages):
         try:
+            # Check API quota before making request
+            if not quota_tracker.can_make_request():
+                logger.warning("API quota exceeded. Stopping search.")
+                break
+                
             if page_token:
                 time.sleep(2)  # Wait for token to be ready
             
             resp = gmaps.places(query, page_token=page_token)
+            quota_tracker.increment()
             
             for result in resp.get("results", []):
                 place_ids.append(result["place_id"])
@@ -193,7 +196,7 @@ def text_search_all_pages(query: str, max_pages: int = 3) -> List[str]:
                 break
                 
         except Exception as e:
-            print(f"    ⚠️  Error fetching page {page_num + 1}: {e}")
+            logger.error(f"Error fetching page {page_num + 1}: {e}")
             break
     
     return place_ids
@@ -203,15 +206,22 @@ def get_businesses_no_site(city: str, keyword: str) -> List[OrderedDict]:
     query = f"{keyword} in {city}"
     leads = []
     
+    logger.info(f"Searching for '{keyword}' in {city}")
     place_ids = text_search_all_pages(query)
     if not place_ids:
+        logger.info(f"No places found for '{keyword}' in {city}")
         return leads
     
-    print(f"  📍 Found {len(place_ids)} places to check...")
+    logger.info(f"Found {len(place_ids)} places to check for '{keyword}' in {city}")
     
     for i, pid in enumerate(place_ids, 1):
         if i % 10 == 0:
-            print(f"    Processed {i}/{len(place_ids)}...")
+            logger.info(f"Processed {i}/{len(place_ids)} places for '{keyword}' in {city}")
+        
+        # Check API quota before each request
+        if not quota_tracker.can_make_request():
+            logger.warning("API quota exceeded. Stopping place details requests.")
+            break
         
         # Get all available details
         details = safe_place_details(
@@ -299,110 +309,151 @@ def get_businesses_no_site(city: str, keyword: str) -> List[OrderedDict]:
         ])
         
         leads.append(lead)
-        time.sleep(DELAY_BETWEEN_REQUESTS)
+        time.sleep(config.api_delay)
     
+    logger.info(f"Found {len(leads)} businesses without websites for '{keyword}' in {city}")
     return leads
 
 def save_leads_to_csv(leads: List[OrderedDict], filename: str) -> int:
-    """Save leads to CSV file with deduplication."""
+    """Save leads to CSV file with enhanced deduplication using fuzzy matching."""
     if not leads:
         return 0
     
-    # Deduplicate by (name, address) - some businesses might not have phone
-    unique_leads = {}
-    for lead in leads:
-        key = (lead["name"], lead["address"])
-        if key not in unique_leads:
-            unique_leads[key] = lead
+    # Enhanced deduplication with fuzzy matching
+    unique_leads = []
+    seen_names = set()
     
-    filepath = os.path.join(OUTPUT_DIR, filename)
+    for lead in leads:
+        business_name = lead["name"].lower().strip()
+        is_duplicate = False
+        
+        # Check against all previously seen names using fuzzy matching
+        for seen_name in seen_names:
+            if fuzzy_match(business_name, seen_name, threshold=0.85):
+                logger.debug(f"Fuzzy duplicate found: '{lead['name']}' matches '{seen_name}'")
+                is_duplicate = True
+                break
+        
+        if not is_duplicate:
+            unique_leads.append(lead)
+            seen_names.add(business_name)
+    
+    filepath = os.path.join(config.output_dir, filename)
     
     with open(filepath, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=list(next(iter(unique_leads.values())).keys()))
+        writer = csv.DictWriter(f, fieldnames=list(next(iter(unique_leads)).keys()))
         writer.writeheader()
-        writer.writerows(unique_leads.values())
+        writer.writerows(unique_leads)
     
+    logger.info(f"Saved {len(unique_leads)} unique leads to {filename} (removed {len(leads) - len(unique_leads)} duplicates)")
     return len(unique_leads)
 
 # ───── 4. MAIN FUNCTION ─────
 def main():
-    print("=" * 60)
-    print("🚀 ENHANCED BUSINESS LEAD SCRAPER")
-    print("=" * 60)
-    print(f"📍 Target Cities: {', '.join(CITIES)}")
-    print(f"🔍 Search Keywords: {len(SEARCH_KEYWORDS)} total")
-    print(f"📁 Output Directory: {OUTPUT_DIR}/")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("🚀 ENHANCED BUSINESS LEAD SCRAPER")
+    logger.info("=" * 60)
+    logger.info(f"📍 Target Cities: {', '.join(config.cities)}")
+    logger.info(f"🔍 Search Keywords: {len(SEARCH_KEYWORDS)} total")
+    logger.info(f"📁 Output Directory: {config.output_dir}/")
+    logger.info(f"🔢 API Quota: {quota_tracker.get_usage_stats()}")
+    logger.info("=" * 60)
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    all_leads = []
-    leads_by_city = {city: [] for city in CITIES}
+    checkpoint_file = f"checkpoint_{timestamp}.json"
     
-    total_combinations = len(CITIES) * len(SEARCH_KEYWORDS)
-    current = 0
+    # Try to load existing checkpoint
+    checkpoint_data = load_checkpoint(checkpoint_file)
+    processed_combinations = set(checkpoint_data.get('processed_combinations', []))
+    
+    all_leads = checkpoint_data.get('all_leads', [])
+    leads_by_city = checkpoint_data.get('leads_by_city', {city: [] for city in config.cities})
+    
+    total_combinations = len(config.cities) * len(SEARCH_KEYWORDS)
+    current = len(processed_combinations)
+    
+    if current > 0:
+        logger.info(f"🔄 Resuming from checkpoint: {current}/{total_combinations} combinations already processed")
     
     # Main scraping loop
-    for city, keyword in itertools.product(CITIES, SEARCH_KEYWORDS):
+    for city, keyword in itertools.product(config.cities, SEARCH_KEYWORDS):
+        combination_key = f"{city}|{keyword}"
+        
+        # Skip if already processed
+        if combination_key in processed_combinations:
+            continue
+            
         current += 1
-        print(f"\n[{current}/{total_combinations}] Searching: '{keyword}' in {city}")
+        logger.info(f"[{current}/{total_combinations}] Searching: '{keyword}' in {city}")
         
         try:
             leads = get_businesses_no_site(city, keyword)
             if leads:
                 all_leads.extend(leads)
                 leads_by_city[city].extend(leads)
-                print(f"  ✅ Found {len(leads)} businesses without websites")
+                logger.info(f"✅ Found {len(leads)} businesses without websites")
             else:
-                print(f"  ➖ No results for this search")
+                logger.info(f"➖ No results for this search")
                 
         except Exception as e:
-            print(f"  ❌ Error: {e}")
+            logger.error(f"Error searching '{keyword}' in {city}: {e}")
             continue
+        
+        # Mark as processed and save checkpoint
+        processed_combinations.add(combination_key)
+        checkpoint_data = {
+            'processed_combinations': list(processed_combinations),
+            'all_leads': all_leads,
+            'leads_by_city': leads_by_city,
+            'timestamp': datetime.now().isoformat()
+        }
+        save_checkpoint(checkpoint_data, checkpoint_file)
         
         # Small delay between different searches
         time.sleep(0.5)
     
     # Save results
-    print("\n" + "=" * 60)
-    print("💾 SAVING RESULTS...")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("💾 SAVING RESULTS...")
+    logger.info("=" * 60)
     
     if not all_leads:
-        print("❌ No leads found. Please check:")
-        print("  - API key is valid")
-        print("  - You have remaining quota")
-        print("  - Cities are spelled correctly")
+        logger.error("No leads found. Please check:")
+        logger.error("  - API key is valid")
+        logger.error("  - You have remaining quota")
+        logger.error("  - Cities are spelled correctly")
         return
     
     # Save main file with all leads
     main_filename = f"all_leads_no_website_{timestamp}.csv"
     total_unique = save_leads_to_csv(all_leads, main_filename)
-    print(f"\n📊 Main File: {total_unique} unique leads → {main_filename}")
+    logger.info(f"📊 Main File: {total_unique} unique leads → {main_filename}")
     
     # Save separate files by city
-    print("\n📂 City-Specific Files:")
+    logger.info("📂 City-Specific Files:")
     for city, city_leads in leads_by_city.items():
         if city_leads:
             city_filename = f"leads_{city.replace(', ', '_').replace(' ', '_')}_{timestamp}.csv"
             city_unique = save_leads_to_csv(city_leads, city_filename)
-            print(f"  • {city}: {city_unique} leads → {city_filename}")
+            logger.info(f"  • {city}: {city_unique} leads → {city_filename}")
     
     # Save by category
-    print("\n📂 Category-Specific Files:")
+    logger.info("📂 Category-Specific Files:")
     for category in BUSINESS_CATEGORIES.keys():
         category_leads = [l for l in all_leads if l["category"] == category]
         if category_leads:
             cat_filename = f"leads_{category}_{timestamp}.csv"
             cat_unique = save_leads_to_csv(category_leads, cat_filename)
-            print(f"  • {category}: {cat_unique} leads → {cat_filename}")
+            logger.info(f"  • {category}: {cat_unique} leads → {cat_filename}")
     
     # Print summary statistics
-    print("\n" + "=" * 60)
-    print("📈 SUMMARY STATISTICS")
-    print("=" * 60)
-    print(f"Total unique businesses found: {total_unique}")
-    print(f"Cities searched: {len(CITIES)}")
-    print(f"Keywords used: {len(SEARCH_KEYWORDS)}")
+    logger.info("=" * 60)
+    logger.info("📈 SUMMARY STATISTICS")
+    logger.info("=" * 60)
+    logger.info(f"Total unique businesses found: {total_unique}")
+    logger.info(f"Cities searched: {len(config.cities)}")
+    logger.info(f"Keywords used: {len(SEARCH_KEYWORDS)}")
+    logger.info(f"API Usage: {quota_tracker.get_usage_stats()}")
     
     # Category breakdown
     category_counts = {}
@@ -410,12 +461,12 @@ def main():
         cat = lead["category"]
         category_counts[cat] = category_counts.get(cat, 0) + 1
     
-    print("\n🏢 Businesses by Category:")
+    logger.info("🏢 Businesses by Category:")
     for cat, count in sorted(category_counts.items(), key=lambda x: x[1], reverse=True):
-        print(f"  • {cat}: {count}")
+        logger.info(f"  • {cat}: {count}")
     
-    print("\n✅ Scraping complete! Check the output folder for your leads.")
-    print(f"📁 Location: {os.path.abspath(OUTPUT_DIR)}/")
+    logger.info("✅ Scraping complete! Check the output folder for your leads.")
+    logger.info(f"📁 Location: {os.path.abspath(config.output_dir)}/")
 
 if __name__ == "__main__":
     main()
