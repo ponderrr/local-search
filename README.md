@@ -1,29 +1,84 @@
-# 🏢 Local Business Lead Generator
+# 🎯 Local Business Lead Generator
 
-A powerful Python tool that finds local businesses without websites for web development outreach. Perfect for freelancers, agencies, and developers looking to identify potential clients who need websites.
+### *Find businesses without websites. Build your client pipeline.*
 
-## ✨ Features
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 
-- **Comprehensive Search**: Scrapes 150+ business types across multiple cities
-- **Smart Verification**: Two-stage process removes chains and businesses with existing websites
-- **Organized Output**: Exports clean CSV files by city and category
-- **Rate Limiting**: Built-in API quota management and request throttling
-- **Resume Capability**: Checkpoint system to resume interrupted scrapes
-- **Stealth Mode**: Advanced anti-detection measures for reliable scraping
+---
 
 ## 🎯 What It Does
 
-1. **Scrapes** Google Places API for businesses in your target cities
-2. **Filters** out businesses that already have websites
-3. **Verifies** results using Google search to remove chains and false positives
-4. **Exports** clean, organized lead lists ready for outreach
+A powerful Python tool that automatically discovers local businesses without websites—perfect for:
+- 🎨 Freelance Web Developers
+- 🏢 Digital Agencies  
+- 💼 Marketing Consultants
+- 🚀 Web Design Entrepreneurs
 
-## 🚀 Quick Start
+**The Problem:** Finding businesses without websites manually takes hours.
+**The Solution:** This tool automates the entire discovery process.
 
-### 1. Installation
+---
+
+## ✨ Key Features
+
+<table>
+<tr>
+<td width="50%">
+
+### 🔍 Smart Discovery
+- Searches 150+ business types
+- Multi-city support
+- 60+ results per search
+- Automated pagination
+
+</td>
+<td width="50%">
+
+### 🎯 Intelligent Filtering
+- Removes chain businesses
+- Filters out existing websites
+- Excludes social media profiles
+- Validates business status
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+### 📊 Rich Data Export
+- Business name & category
+- Phone & address
+- Ratings & reviews
+- Operating hours
+- 15+ data points per lead
+
+</td>
+<td width="50%">
+
+### 🛡️ Production Ready
+- API quota management
+- Rate limiting protection
+- Checkpoint recovery
+- Comprehensive logging
+- Stealth anti-detection
+
+</td>
+</tr>
+</table>
+
+---
+
+## 🚀 Quick Start (5 Minutes)
+
+### Prerequisites
+- Python 3.8+
+- Google Places API key ([Get free key](https://developers.google.com/maps/documentation/places/web-service/get-api-key))
+
+### Installation
 
 ```bash
-# Clone the repository
+# Clone and enter directory
 git clone https://github.com/ponderrr/local-search.git
 cd local-search
 
@@ -39,170 +94,262 @@ source venv/bin/activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Install Playwright browser
+# Install browser for verification
 playwright install chromium
 ```
 
-### 2. Configuration
+### Configuration
 
 ```bash
-# Copy the example environment file
+# Copy example config
 cp .env.example .env
 
-# Edit .env with your settings
-# Required: Add your Google Places API key
-GOOGLE_API_KEY=your_actual_api_key_here
-SEARCH_CITIES=New York NY, Los Angeles CA, Chicago IL
+# Edit with your settings (required: API key and cities)
+nano .env  # or use your editor
 ```
 
-### 3. Run the Scraper
+### Run
 
 ```bash
-# Basic usage - scrape all categories
+# Scrape businesses
 python scrape_no_website.py
 
-# Verify the results (removes chains and false positives)
+# Verify results (removes chains/false positives)
 python verify_no_website.py
+
+# View analytics
+python analytics_dashboard.py
 ```
 
-## 📋 Configuration Options
+**Done!** Check `leads_output/` for your CSV files.
 
-Edit your `.env` file to customize the scraper:
+---
+
+## ⚙️ Configuration
+
+### Required Settings (.env file)
 
 ```env
-# Required
-GOOGLE_API_KEY=your_google_places_api_key
-SEARCH_CITIES=City1 State, City2 State, City3 State
-
-# Optional
-API_DELAY=0.2                    # Delay between API calls (seconds)
-OUTPUT_DIR=leads_output          # Output directory for CSV files
-MAX_PAGES=3                      # Max pages to scrape per search
-CONCURRENT_BROWSERS=3            # Number of parallel verification browsers
+GOOGLE_API_KEY=your_api_key_here
+SEARCH_CITIES=Austin TX, Portland OR, Denver CO
 ```
 
-## 📊 Output Files
+### Optional Settings (with defaults)
 
-The scraper generates several organized CSV files:
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `API_DELAY` | 0.2 | Seconds between API calls |
+| `MAX_PAGES` | 3 | Pages per search (1-10) |
+| `CONCURRENT_BROWSERS` | 3 | Parallel verification browsers |
+| `HEADLESS` | true | Run browsers invisibly |
+| `OUTPUT_DIR` | leads_output | Where to save results |
 
-- `all_leads_no_website_YYYYMMDD_HHMMSS.csv` - All leads combined
-- `leads_CityName_YYYYMMDD_HHMMSS.csv` - Leads by city
-- `leads_category_YYYYMMDD_HHMMSS.csv` - Leads by business category
-- `verified/verified_no_website_YYYYMMDD_HHMMSS.csv` - Final verified leads
+**Performance Tips:**
+- **Faster:** `API_DELAY=0.15`, `MAX_PAGES=2`, `CONCURRENT_BROWSERS=5`
+- **Safer:** `API_DELAY=0.3`, `MAX_PAGES=3`, `CONCURRENT_BROWSERS=2`
 
-## 🏢 Business Categories
+---
 
-The scraper searches for 150+ business types across 12 categories:
+## 📊 What You Get
 
-- **Food & Beverage**: Restaurants, cafes, bars, food trucks
-- **Retail**: Clothing stores, boutiques, gift shops
-- **Health & Wellness**: Gyms, spas, salons, medical practices
-- **Professional Services**: Law firms, accounting, real estate
-- **Home Services**: Plumbers, electricians, contractors
-- **Automotive**: Repair shops, dealerships, detailing
-- **Entertainment**: Bowling alleys, arcades, venues
-- **Education**: Daycares, schools, tutoring centers
-- **Events**: Venues, photographers, caterers
-- **Manufacturing**: Factories, wholesalers, suppliers
-- **Agriculture**: Farms, nurseries, pet services
-- **Transportation**: Trucking, moving, logistics
+### Output Files
+
+```
+leads_output/
+├── all_leads_no_website_TIMESTAMP.csv           # All leads
+├── leads_CityName_TIMESTAMP.csv                 # By city
+├── leads_category_TIMESTAMP.csv                 # By category
+└── verified/
+    └── verified_no_website_TIMESTAMP.csv        # ⭐ Clean leads
+```
+
+### Data Fields (15+ per business)
+
+**Core Info:** Name, Phone, Address, City
+**Engagement:** Rating, Reviews, Hours, Open Status
+**Intelligence:** Category, Price Level, Services, Accessibility
+
+### Expected Results
+
+| City Size | Population | Expected Leads |
+|-----------|-----------|----------------|
+| Small | 50k | 200-500 |
+| Medium | 200k | 500-1,200 |
+| Large | 1M+ | 1,200-3,000 |
+
+**Verification Rate:** 60-70% pass final verification
+
+---
+
+## 🏢 Business Categories (150+ Types)
+
+The scraper searches 12 categories with 150+ specific business types:
+
+**Food & Beverage** • **Retail** • **Health & Wellness** • **Professional Services** • **Home Services** • **Automotive** • **Entertainment** • **Education** • **Events** • **Manufacturing** • **Agriculture** • **Transportation**
+
+Full list in `scrape_no_website.py` (easily customizable)
+
+---
+
+## 🛡️ Anti-Detection & Stealth Features
+
+Built-in measures to avoid detection and rate limiting:
+
+- ✅ Random delays between requests (0.5-3 seconds)
+- ✅ Rotating user agents
+- ✅ Browser fingerprint masking
+- ✅ Human-like interaction patterns
+- ✅ Exponential backoff on errors
+- ✅ API quota tracking and limits
+
+---
+
+## 📈 Analytics Dashboard
+
+Generate interactive HTML dashboards:
+
+```bash
+python analytics_dashboard.py
+```
+
+**Includes:**
+- Business distribution by city
+- Category breakdown charts
+- Data quality metrics
+- Rating statistics
+- Interactive visualizations
+
+---
 
 ## 🔧 Advanced Usage
 
-### Custom Search Categories
+### Custom Business Categories
 
-Edit `BUSINESS_CATEGORIES` in `scrape_no_website.py` to add your own business types:
+Edit `BUSINESS_CATEGORIES` in `scrape_no_website.py`:
 
 ```python
 BUSINESS_CATEGORIES = {
-    "your_category": [
-        "business type 1",
-        "business type 2",
-        # ... add more
+    "your_niche": [
+        "specific business type",
+        "another business type"
     ]
 }
 ```
 
-### Resume Interrupted Scrapes
+### Command Line Interface
 
-The scraper automatically saves progress. If interrupted, it will resume from where it left off on the next run.
+```bash
+# Quick scrape specific cities
+python run_scraper.py --cities "Austin TX" "Seattle WA"
 
-### Memory Optimization
+# Scrape and verify in one command
+python run_scraper.py --cities "Denver CO" --verify
 
-For large datasets (10k+ businesses), the scraper uses batch processing to prevent memory issues.
+# Resume interrupted scrape
+python run_scraper.py --resume
 
-## 🛡️ API Limits & Best Practices
-
-- **Google Places API**: 25,000 requests/day (free tier)
-- **Rate Limiting**: Built-in delays prevent quota exceeded errors
-- **Quota Tracking**: Monitor your API usage in real-time
-- **Stealth Mode**: Random delays and user agents to avoid detection
-
-## 📈 Expected Results
-
-Typical results per city:
-
-- **Small cities** (50k population): 200-500 leads
-- **Medium cities** (200k population): 500-1,200 leads
-- **Large cities** (1M+ population): 1,200-3,000 leads
-
-**Verification rate**: ~60-70% of initial leads pass verification
-
-## 🚨 Troubleshooting
-
-### Common Issues
-
-**"GOOGLE_API_KEY not found"**
-
-- Make sure you have a `.env` file with your API key
-- Verify the API key is valid and has Places API enabled
-
-**"No leads found"**
-
-- Check your API quota hasn't been exceeded
-- Verify city names are spelled correctly
-- Try reducing the number of search keywords
-
-**Playwright errors**
-
-- Run `playwright install chromium` to install the browser
-- Check your internet connection
-
-### Getting Help
-
-1. Check the logs in the `logs/` directory
-2. Verify your `.env` configuration
-3. Test with a single city first
-4. Check Google Cloud Console for API quota status
-
-## 🔒 Security & Privacy
-
-- API keys are stored in `.env` files (never committed to git)
-- No personal data is collected or stored
-- All data processing happens locally
-- Respects Google's Terms of Service
-
-## 📝 License
-
-This project is open source. Feel free to modify and distribute according to your needs.
-
-## 🤝 Contributing
-
-Contributions welcome! Areas for improvement:
-
-- Additional business categories
-- Better deduplication algorithms
-- Enhanced stealth measures
-- New export formats
-
-## 📞 Support
-
-For questions or issues:
-
-1. Check the troubleshooting section above
-2. Review the logs for error details
-3. Open an issue with your configuration and error details
+# Custom settings
+python run_scraper.py --cities "NYC NY" --delay 0.3 --max-pages 2
+```
 
 ---
 
-**Happy Lead Hunting! 🎯**
+## 🐛 Troubleshooting
+
+<details>
+<summary><b>❌ "GOOGLE_API_KEY not found"</b></summary>
+
+**Fix:**
+1. Ensure `.env` file exists in project root
+2. Verify API key format (starts with 'AIza')
+3. Enable Places API in Google Cloud Console
+4. No extra spaces around the key
+</details>
+
+<details>
+<summary><b>❌ "No leads found"</b></summary>
+
+**Fix:**
+1. Check API quota in Google Cloud Console
+2. Verify city format: `"Austin TX"` not `"Austin, Texas"`
+3. Test with one city first
+4. Check logs in `logs/` directory
+</details>
+
+<details>
+<summary><b>❌ Playwright errors</b></summary>
+
+**Fix:**
+```bash
+playwright install chromium --force
+```
+</details>
+
+<details>
+<summary><b>⚠️ "API quota exceeded"</b></summary>
+
+**Fix:**
+- Wait 24 hours for quota reset
+- Upgrade to paid tier (100k requests/day)
+- Reduce `MAX_PAGES` in .env
+- Process fewer cities at once
+</details>
+
+---
+
+## 📝 API Limits & Costs
+
+**Google Places API:**
+- **Free Tier:** 25,000 requests/day
+- **Cost After:** $17 per 1,000 requests
+- **Paid Tier:** 100,000+ requests/day
+
+**Tool automatically:**
+- ✅ Tracks your usage
+- ✅ Prevents quota exceeded errors
+- ✅ Shows remaining quota
+
+---
+
+## 🔒 Security Best Practices
+
+1. **Never commit `.env`** - Already in .gitignore
+2. **Rotate API keys** every 90 days
+3. **Restrict API keys** by IP (optional)
+4. **Monitor usage** in Google Cloud Console
+5. **Use separate keys** for dev/production
+
+---
+
+## 📄 License
+
+MIT License - See LICENSE file for details.
+
+**TL;DR:** Use commercially, modify freely, distribute openly. Just include the license.
+
+---
+
+## 💬 Support
+
+- 📖 Check logs in `logs/` directory
+- 🔍 Review this README thoroughly
+- 🐛 Open issues on GitHub
+- 💡 Suggest features
+
+---
+
+## 🙏 Acknowledgments
+
+- Google Places API for business data
+- Playwright for browser automation
+- Python community for amazing libraries
+
+---
+
+<div align="center">
+
+**Made with ❤️ for web developers and digital agencies**
+
+⭐ Star this repo if it helps you land clients!
+
+</div>

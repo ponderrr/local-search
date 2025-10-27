@@ -19,6 +19,46 @@ from googlemaps.exceptions import ApiError, TransportError
 # Import our utility modules
 from utils import ScraperConfig, APIQuotaTracker, setup_logging, ScraperConstants, save_checkpoint, load_checkpoint, fuzzy_match
 
+# ───── STEALTH ENHANCEMENTS ─────
+# Rotating user agents for better stealth
+USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+]
+
+def get_random_user_agent():
+    """Get a random user agent for stealth."""
+    import random
+    return random.choice(USER_AGENTS)
+
+def smart_api_call_with_retry(func, max_retries=3, base_delay=1):
+    """Retry API calls with exponential backoff for better reliability."""
+    import random
+    for attempt in range(max_retries):
+        try:
+            return func()
+        except Exception as e:
+            if attempt == max_retries - 1:
+                logger.error(f"API call failed after {max_retries} attempts: {e}")
+                raise
+            delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+            logger.warning(f"API call attempt {attempt + 1} failed, retrying in {delay:.2f}s: {e}")
+            time.sleep(delay)
+    return None
+
+def jittered_delay(base_delay):
+    """Add random jitter to delays to appear more human-like."""
+    import random
+    jitter = random.uniform(-0.3, 0.3) * base_delay
+    actual_delay = max(0.1, base_delay + jitter)
+    time.sleep(actual_delay)
+
 # ───── 1. LOAD CONFIGURATION ─────
 try:
     config = ScraperConfig.from_env()
@@ -154,22 +194,19 @@ def format_hours(opening_hours: Dict) -> str:
     return " | ".join(opening_hours["weekday_text"])
 
 def safe_place_details(pid: str, fields: List[str], max_retry: int = 3) -> Dict:
-    """Place Details with exponential back-off on quota/network errors."""
-    delay = 1
-    for attempt in range(max_retry):
-        try:
-            result = gmaps.place(place_id=pid, fields=fields)
-            return result.get("result", {})
-        except (ApiError, TransportError) as e:
-            if attempt == max_retry - 1:
-                print(f"    ⚠️  Skipping place after {max_retry} errors: {e}")
-                return {}
-            time.sleep(delay)
-            delay *= 2
-    return {}
+    """Place Details with exponential back-off on quota/network errors using smart retry logic."""
+    def api_call():
+        return gmaps.place(place_id=pid, fields=fields)
+    
+    try:
+        result = smart_api_call_with_retry(api_call, max_retry, base_delay=1)
+        return result.get("result", {}) if result else {}
+    except Exception as e:
+        logger.error(f"Failed to get place details for {pid} after {max_retry} retries: {e}")
+        return {}
 
 def text_search_all_pages(query: str, max_pages: int = None) -> List[str]:
-    """Get all place IDs from text search (up to 60 results)."""
+    """Get all place IDs from text search (up to 60 results) with stealth enhancements."""
     if max_pages is None:
         max_pages = config.max_pages
         
@@ -184,9 +221,18 @@ def text_search_all_pages(query: str, max_pages: int = None) -> List[str]:
                 break
                 
             if page_token:
-                time.sleep(2)  # Wait for token to be ready
+                # Use jittered delay for more human-like behavior
+                jittered_delay(2.0)  # Wait for token to be ready
             
-            resp = gmaps.places(query, page_token=page_token)
+            # Use smart retry logic for API calls
+            def search_call():
+                return gmaps.places(query, page_token=page_token)
+            
+            resp = smart_api_call_with_retry(search_call, max_retry=3, base_delay=1)
+            if not resp:
+                logger.error(f"Failed to get search results for page {page_num + 1}")
+                break
+                
             quota_tracker.increment()
             
             for result in resp.get("results", []):
@@ -310,7 +356,8 @@ def get_businesses_no_site(city: str, keyword: str) -> List[OrderedDict]:
         ])
         
         leads.append(lead)
-        time.sleep(config.api_delay)
+        # Use jittered delay for more human-like behavior
+        jittered_delay(config.api_delay)
     
     logger.info(f"Found {len(leads)} businesses without websites for '{keyword}' in {city}")
     return leads
@@ -435,8 +482,8 @@ def main():
         }
         save_checkpoint(checkpoint_data, checkpoint_file)
         
-        # Small delay between different searches
-        time.sleep(0.5)
+        # Small jittered delay between different searches for stealth
+        jittered_delay(0.5)
     
     # Save results
     logger.info("=" * 60)

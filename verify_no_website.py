@@ -32,6 +32,17 @@ except Exception as e:
     print(f"❌ Configuration Error: {e}")
     exit(1)
 
+# For advanced users: Consider using rotating proxies for maximum stealth
+# Example services: Bright Data, Oxylabs, Smartproxy, ProxyMesh
+# Can significantly reduce detection rates for large-scale operations
+# 
+# Implementation example:
+# proxy_config = {
+#     'server': 'http://username:password@proxy-server:port',
+#     'bypass': 'localhost,127.0.0.1'
+# }
+# context = await browser.new_context(proxy=proxy_config, ...)
+
 # Known chain/franchise domains to filter out
 CHAIN_DOMAINS = {
     'starbucks.com', 'mcdonalds.com', 'subway.com', 'dunkindonuts.com',
@@ -125,6 +136,7 @@ class WebsiteVerifier:
     async def search_business(self, page: Page, business: Dict) -> Dict:
         """
         Search for a business on Google and determine if it has a website.
+        Enhanced with realistic browser behavior patterns.
         Returns the business dict with verification status added.
         """
         business_name = business['name']
@@ -141,11 +153,19 @@ class WebsiteVerifier:
             # Random delay to appear human-like
             await asyncio.sleep(random.uniform(config.search_delay_min, config.search_delay_max))
             
-            # Navigate to Google
+            # Navigate to Google with realistic behavior
             await page.goto('https://www.google.com/search?q=' + search_query.replace(' ', '+'))
+            
+            # Simulate human reading behavior - scroll and pause
+            await page.evaluate("window.scrollTo(0, 200)")
+            await asyncio.sleep(random.uniform(0.5, 1.5))
             
             # Wait for results to load
             await page.wait_for_selector('div#search', timeout=5000)
+            
+            # Simulate mouse movement (human-like behavior)
+            await page.mouse.move(random.randint(100, 800), random.randint(100, 400))
+            await asyncio.sleep(random.uniform(0.2, 0.8))
             
             # Get all search result links
             results = await page.query_selector_all('div#search a')
@@ -154,9 +174,17 @@ class WebsiteVerifier:
             is_chain = False
             website_found = None
             
-            # Check first 5-7 results
+            # Check first 5-7 results with realistic interaction
             for i, result in enumerate(results[:7]):
                 try:
+                    # Simulate reading time before clicking
+                    if i > 0:
+                        await asyncio.sleep(random.uniform(0.3, 0.8))
+                    
+                    # Scroll to result if needed (simulate human behavior)
+                    await result.scroll_into_view_if_needed()
+                    await asyncio.sleep(random.uniform(0.1, 0.3))
+                    
                     href = await result.get_attribute('href')
                     if not href:
                         continue
@@ -202,12 +230,63 @@ class WebsiteVerifier:
         return business
     
     async def process_batch(self, browser: Browser, businesses: List[Dict], worker_id: int):
-        """Process a batch of businesses with one browser instance."""
+        """Process a batch of businesses with one browser instance with enhanced stealth."""
+        # Rotate user agents for better stealth
+        user_agents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15'
+        ]
+        
         context = await browser.new_context(
             viewport={'width': 1280, 'height': 720},
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+            user_agent=random.choice(user_agents),
+            # Additional stealth settings
+            extra_http_headers={
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Cache-Control': 'max-age=0'
+            },
+            # Disable automation indicators
+            java_script_enabled=True,
+            bypass_csp=True,
+            ignore_https_errors=True
         )
+        
         page = await context.new_page()
+        
+        # Add realistic browser behavior patterns
+        await page.add_init_script("""
+            // Remove webdriver property
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined,
+            });
+            
+            // Mock plugins
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => [1, 2, 3, 4, 5],
+            });
+            
+            // Mock languages
+            Object.defineProperty(navigator, 'languages', {
+                get: () => ['en-US', 'en'],
+            });
+            
+            // Mock permissions
+            const originalQuery = window.navigator.permissions.query;
+            window.navigator.permissions.query = (parameters) => (
+                parameters.name === 'notifications' ?
+                    Promise.resolve({ state: Notification.permission }) :
+                    originalQuery(parameters)
+            );
+        """)
         
         for business in businesses:
             self.processed += 1
@@ -235,10 +314,50 @@ class WebsiteVerifier:
         logger.info(f"   Using {config.concurrent_browsers} concurrent browsers")
         
         async with async_playwright() as p:
-            # Launch browser
+            # Launch browser with enhanced stealth arguments
             browser = await p.chromium.launch(
                 headless=config.headless,
-                args=['--disable-blink-features=AutomationControlled']
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-dev-shm-usage',
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-web-security',
+                    '--disable-features=VizDisplayCompositor',
+                    '--disable-extensions',
+                    '--disable-plugins',
+                    '--disable-images',  # Faster loading
+                    '--disable-javascript',  # Only if not needed
+                    '--disable-gpu',
+                    '--no-first-run',
+                    '--no-default-browser-check',
+                    '--disable-default-apps',
+                    '--disable-popup-blocking',
+                    '--disable-translate',
+                    '--disable-background-timer-throttling',
+                    '--disable-renderer-backgrounding',
+                    '--disable-backgrounding-occluded-windows',
+                    '--disable-client-side-phishing-detection',
+                    '--disable-sync',
+                    '--metrics-recording-only',
+                    '--no-report-upload',
+                    '--disable-hang-monitor',
+                    '--disable-prompt-on-repost',
+                    '--disable-domain-reliability',
+                    '--disable-component-extensions-with-background-pages',
+                    '--disable-background-networking',
+                    '--disable-breakpad',
+                    '--disable-component-update',
+                    '--disable-crash-reporter',
+                    '--disable-dev-tools',
+                    '--disable-logging',
+                    '--disable-speech-api',
+                    '--hide-scrollbars',
+                    '--mute-audio',
+                    '--no-zygote',
+                    '--disable-ipc-flooding-protection',
+                    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+                ]
             )
             
             # Split businesses into batches for each worker
